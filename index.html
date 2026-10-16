@@ -111,7 +111,8 @@ function parse(text){
     }
     items.push({num:+m[1],body:m[2].replace(/\s+$/,""),source:m[3].trim()});
   }
-  items.forEach((it,i)=>{ if(it.num!==i+1) throw new Error(`번호가 이어지지 않아요: ${i+1}번 자리에 ${it.num}번이 있어요`); });
+  const base=items[0]?items[0].num:1;
+  items.forEach((it,i)=>{ if(it.num!==base+i) throw new Error(`번호가 이어지지 않아요: ${base+i}번 자리에 ${it.num}번이 있어요`); });
   if(!items.length) throw new Error("문항을 찾지 못했어요.");
   return {items,head};
 }
@@ -132,23 +133,17 @@ function wrapItem(it){
 }
 
 function paginate(items,lines){
+  // 한 페이지를 최대한 꽉 채우고, 넘치면 다음 페이지로 (균등 분할 안 함)
   const span=n=>(lines[n].length-1)*WITHIN;
-  const fits=idx=>{let y=null;for(let i=0;i<idx.length;i++){const fy=i===0?FIRST_BASELINE:y-BETWEEN;y=fy-span(idx[i]);if(y<BOTTOM_LIMIT)return false;}return true;};
-  const all=items.map(i=>i.num);
-  // greedy
-  let pages=[],cur=[],y=null;
-  for(const n of all){
+  const pages=[]; let cur=[],y=null;
+  for(const it of items){
+    const n=it.num;
     const fy=!cur.length?FIRST_BASELINE:y-BETWEEN; let ly=fy-span(n);
     if(ly<BOTTOM_LIMIT&&cur.length){pages.push(cur);cur=[n];ly=FIRST_BASELINE-span(n);} else cur.push(n);
     y=ly;
   }
   if(cur.length)pages.push(cur);
-  let np=pages.length;
-  for(;;np++){
-    const b=Math.floor(all.length/np), r=all.length%np; const chunks=[]; let p=0;
-    for(let i=0;i<np;i++){const s=i<r?b+1:b;chunks.push(all.slice(p,p+s));p+=s;}
-    if(chunks.every(fits)) return chunks;
-  }
+  return pages;
 }
 
 let LAST=null;
