@@ -60,7 +60,9 @@ button.primary{background:var(--accent);color:#fff}
    <div class="btns">
     <label class="filebtn">txt 첨부<input id="file" type="file" accept=".txt,text/plain"></label>
     <button class="primary" id="go">페이지 만들기</button>
-    <button id="print" disabled>PDF로 저장 / 인쇄</button>
+    <button id="pdf" disabled>PDF로 저장</button>
+    <button id="print" disabled>인쇄</button>
+    <button id="img" disabled>이미지로 저장</button>
    </div>
    <div id="msg"></div>
   </div>
@@ -149,20 +151,20 @@ function paginate(items,lines){
   }
 }
 
+let LAST=null;
 const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const f2=x=>x.toFixed(2);
 
-function render(items,roman,title,rsize){
+function layout(items,roman,title,rsize){
   const lines={}; items.forEach(it=>lines[it.num]=wrapItem(it));
   const pages=paginate(items,lines);
-  // 로마숫자 잉크 기준 중앙 배치 (+3pt)
   setFont(700,rsize); const m=ctx.measureText(roman);
   const inkL=-m.actualBoundingBoxLeft, inkW=m.actualBoundingBoxLeft+m.actualBoundingBoxRight;
   const romanX=(BOX_LEFT_X+DIVIDER_X)/2 - inkW/2 - inkL + 3.0;
   const Ow=width("O",700,OX_SIZE), Xw=width("X",700,OX_SIZE);
-  const out=[];
+  const model=[];
   pages.forEach((pg,pi)=>{
-    const g=[]; const T=(x,base,txt,wt,sz,col)=>g.push(`<text x="${f2(x)}" y="${f2(PAGE_H-base)}" font-weight="${wt}" font-size="${sz}" fill="${col}">${esc(txt)}</text>`);
+    const ops=[]; const T=(x,base,t,w,sz,c)=>ops.push({k:"t",x,y:base,t,w,s:sz,c});
     T(romanX,ROMAN_BASELINE,roman,700,rsize,COL_TITLE);
     T(KR_TITLE_X,KR_TITLE_BASELINE,title,700,KR_TITLE_SIZE,COL_TITLE);
     T(PAGE_NUM_X,PAGE_NUM_BASELINE,String(pi+1).padStart(2,"0"),400,PAGE_NUM_SIZE,COL_TITLE);
@@ -177,16 +179,101 @@ function render(items,roman,title,rsize){
         if(li<L.length-1) y-=WITHIN;
       });
       const ds=endX+4.0, de=O_CENTER-8.0;
-      if(de>ds) g.push(`<line x1="${f2(ds)}" x2="${f2(de)}" y1="${f2(PAGE_H-(ly+3.0))}" y2="${f2(PAGE_H-(ly+3.0))}" stroke="${COL_DOT}" stroke-width="0.6" stroke-dasharray="1.4 1.6"/>`);
+      if(de>ds) ops.push({k:"l",x1:ds,x2:de,y:ly+3.0,c:COL_DOT});
       T(O_CENTER-Ow/2,ly,"O",700,OX_SIZE,COL_BODY);
       T(X_CENTER-Xw/2,ly,"X",700,OX_SIZE,COL_BODY);
       prev=ly;
     });
-    out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_W} ${PAGE_H}" width="${PAGE_W}pt" height="${PAGE_H}pt" font-family='${FAM}' style="font-kerning:none">`+
-      `<image href="bg.png" x="0" y="0" width="${PAGE_W}" height="${PAGE_H}" preserveAspectRatio="none"/>`+g.join("")+`</svg>`);
+    model.push(ops);
   });
-  return {html:out.join(""),pages:pages.length,per:pages.map(p=>p.length)};
+  return model;
 }
+
+function svgOf(ops){
+  const g=ops.map(o=>o.k==="t"
+    ? `<text x="${f2(o.x)}" y="${f2(PAGE_H-o.y)}" font-weight="${o.w}" font-size="${o.s}" fill="${o.c}">${esc(o.t)}</text>`
+    : `<line x1="${f2(o.x1)}" x2="${f2(o.x2)}" y1="${f2(PAGE_H-o.y)}" y2="${f2(PAGE_H-o.y)}" stroke="${o.c}" stroke-width="0.6" stroke-dasharray="1.4 1.6"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_W} ${PAGE_H}" width="${PAGE_W}pt" height="${PAGE_H}pt" font-family='${FAM}' style="font-kerning:none">`+
+    `<image href="bg.png" x="0" y="0" width="${PAGE_W}" height="${PAGE_H}" preserveAspectRatio="none"/>`+g+`</svg>`;
+}
+
+let BG=null;
+function loadBG(){return BG||(BG=new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src="bg.png";}));}
+async function canvasOf(ops,scale){
+  const bg=await loadBG();
+  const cv=document.createElement("canvas"); cv.width=Math.round(PAGE_W*scale); cv.height=Math.round(PAGE_H*scale);
+  const c=cv.getContext("2d"); c.scale(cv.width/PAGE_W,cv.height/PAGE_H);
+  if("fontKerning" in c) c.fontKerning="none";
+  c.drawImage(bg,0,0,PAGE_W,PAGE_H); c.textBaseline="alphabetic";
+  for(const o of ops){
+    if(o.k==="t"){c.font=`${o.w} ${o.s}px ${FAM}`;c.fillStyle=o.c;c.fillText(o.t,o.x,PAGE_H-o.y);}
+    else{c.save();c.strokeStyle=o.c;c.lineWidth=0.6;c.setLineDash([1.4,1.6]);c.beginPath();c.moveTo(o.x1,PAGE_H-o.y);c.lineTo(o.x2,PAGE_H-o.y);c.stroke();c.restore();}
+  }
+  return cv;
+}
+const toBlob=(cv,type,q)=>new Promise(r=>cv.toBlob(r,type,q));
+
+// ---------- 파일 만들기: PDF(이미지 기반) / ZIP ----------
+const enc=new TextEncoder();
+function concat(parts){let n=0;parts.forEach(p=>n+=p.length);const o=new Uint8Array(n);let k=0;parts.forEach(p=>{o.set(p,k);k+=p.length;});return o;}
+function buildPDF(jpegs){ // jpegs: [{bytes,w,h}]
+  const objs=[]; const add=b=>{objs.push(b);return objs.length;};
+  const n=jpegs.length;
+  // 1=catalog 2=pages, then per page: image, content, page
+  objs.push(null,null);
+  const pageIds=[];
+  jpegs.forEach((j,i)=>{
+    const img=objs.length+1, cont=img+1, page=img+2;
+    add(concat([enc.encode(`<< /Type /XObject /Subtype /Image /Width ${j.w} /Height ${j.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${j.bytes.length} >>\nstream\n`),j.bytes,enc.encode("\nendstream")]));
+    const cs=`q ${PAGE_W} 0 0 ${PAGE_H} 0 0 cm /Im0 Do Q`;
+    add(enc.encode(`<< /Length ${cs.length} >>\nstream\n${cs}\nendstream`));
+    add(enc.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /XObject << /Im0 ${img} 0 R >> >> /Contents ${cont} 0 R >>`));
+    pageIds.push(page);
+  });
+  objs[0]=enc.encode("<< /Type /Catalog /Pages 2 0 R >>");
+  objs[1]=enc.encode(`<< /Type /Pages /Kids [${pageIds.map(i=>i+" 0 R").join(" ")}] /Count ${n} >>`);
+  const out=[enc.encode("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")]; let off=out[0].length; const xref=[];
+  objs.forEach((b,i)=>{xref.push(off);const h=enc.encode(`${i+1} 0 obj\n`),t=enc.encode("\nendobj\n");out.push(h,b,t);off+=h.length+b.length+t.length;});
+  let x=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+xref.map(o=>String(o).padStart(10,"0")+" 00000 n \n").join("");
+  x+=`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${off}\n%%EOF`;
+  out.push(enc.encode(x)); return new Blob([concat(out)],{type:"application/pdf"});
+}
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+const crc32=b=>{let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC[(c^b[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0;};
+function buildZip(files){ // [{name,bytes}] store-only
+  const out=[],cen=[]; let off=0;
+  for(const f of files){
+    const nm=enc.encode(f.name), crc=crc32(f.bytes), sz=f.bytes.length;
+    const lh=new DataView(new ArrayBuffer(30)); lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+    lh.setUint32(14,crc,true);lh.setUint32(18,sz,true);lh.setUint32(22,sz,true);lh.setUint16(26,nm.length,true);
+    out.push(new Uint8Array(lh.buffer),nm,f.bytes);
+    const ch=new DataView(new ArrayBuffer(46)); ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);
+    ch.setUint32(16,crc,true);ch.setUint32(20,sz,true);ch.setUint32(24,sz,true);ch.setUint16(28,nm.length,true);ch.setUint32(42,off,true);
+    cen.push(new Uint8Array(ch.buffer),nm); off+=30+nm.length+sz;
+  }
+  const cd=concat(cen); const e=new DataView(new ArrayBuffer(22)); e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cd.length,true);e.setUint32(16,off,true);
+  return new Blob([...out,cd,new Uint8Array(e.buffer)],{type:"application/zip"});
+}
+function download(blob,name){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+}
+let MODEL=null, META=null;
+const baseName=()=>`${META.roman} ${META.title} Ori.`;
+async function savePDF(){
+  setMsg("PDF 만드는 중…");
+  const jp=[]; for(const ops of MODEL){const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/jpeg",0.95);jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:cv.width,h:cv.height});}
+  download(buildPDF(jp),baseName()+".pdf"); setMsg(`PDF 저장 완료 (${MODEL.length}페이지, 이미지 기반)`,"ok");
+}
+async function saveImages(){
+  setMsg("이미지 만드는 중…");
+  const files=[]; let i=0;
+  for(const ops of MODEL){i++;const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/png");files.push({name:`${baseName()} ${String(i).padStart(2,"0")}.png`,bytes:new Uint8Array(await b.arrayBuffer())});}
+  if(files.length===1) download(new Blob([files[0].bytes],{type:"image/png"}),files[0].name);
+  else download(buildZip(files),baseName()+" 이미지.zip");
+  setMsg(files.length===1?"이미지 저장 완료":`이미지 ${files.length}장을 zip으로 저장했어요`,"ok");
+}
+function showPages(){ $("pages").innerHTML=MODEL.map(svgOf).join(""); }
 
 function setMsg(t,cls){const m=$("msg");m.textContent=t;m.className=cls||"";}
 function fillHead(head){
@@ -205,17 +292,20 @@ async function build(){
     await Promise.all([document.fonts.load('400 10px NSKR',"가"),document.fonts.load('700 10px NSKR',"가")]);
     await document.fonts.ready;
     const rs=parseFloat($("rsize").value)||romanSize(roman);
-    const r=render(items,roman,title,rs);
-    $("pages").innerHTML=r.html;
+    MODEL=layout(items,roman,title,rs); META={roman,title};
+    showPages();
     document.title=`${roman} ${title} Ori.`;
-    $("print").disabled=false;
-    setMsg(`완료: ${items.length}문항, ${r.pages}페이지 (페이지당 ${[...new Set(r.per)].join("/")}문항), 로마숫자 ${rs}pt\n[PDF로 저장 / 인쇄] → 대상: PDF로 저장(여백 없음, 배경 그래픽 켜기)`,"ok");
+    ["pdf","print","img"].forEach(k=>$(k).disabled=false);
+    const per=MODEL.map(p=>p.filter(o=>o.k==="t"&&o.t==="O").length);
+    setMsg(`완료: ${items.length}문항, ${MODEL.length}페이지 (페이지당 ${[...new Set(per)].join("/")}문항), 로마숫자 ${rs}pt\n[PDF로 저장]·[이미지로 저장]은 바로 파일로 내려받고, [인쇄]는 인쇄 창을 열어요(여백 없음, 배경 그래픽 켜기)`,"ok");
     try{localStorage.setItem("ox-draft",$("src").value);}catch(e){}
   }catch(e){setMsg(e.message,"err");}
 }
 
 $("go").onclick=build;
 $("print").onclick=()=>window.print();
+$("pdf").onclick=()=>savePDF().catch(e=>setMsg("PDF 오류: "+e.message,"err"));
+$("img").onclick=()=>saveImages().catch(e=>setMsg("이미지 오류: "+e.message,"err"));
 $("file").onchange=async e=>{
   const f=e.target.files[0]; if(!f) return;
   $("src").value=await f.text(); build();
