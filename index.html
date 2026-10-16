@@ -260,13 +260,30 @@ async function savePDF(){
   const jp=[]; for(const ops of MODEL){const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/jpeg",0.95);jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:cv.width,h:cv.height});}
   download(buildPDF(jp),baseName()+".pdf"); setMsg(`PDF 저장 완료 (${MODEL.length}페이지, 이미지 기반)`,"ok");
 }
+let IMGS=null;
+function prepImages(){
+  const model=MODEL, name=baseName();
+  IMGS=(async()=>{
+    const out=[]; let i=0;
+    for(const ops of model){i++;const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/png");out.push(new File([b],`${name} ${String(i).padStart(2,"0")}.png`,{type:"image/png"}));}
+    return out;
+  })();
+  IMGS.catch(()=>{});
+}
 async function saveImages(){
   setMsg("이미지 만드는 중…");
-  const files=[]; let i=0;
-  for(const ops of MODEL){i++;const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/png");files.push({name:`${baseName()} ${String(i).padStart(2,"0")}.png`,bytes:new Uint8Array(await b.arrayBuffer())});}
-  if(files.length===1) download(new Blob([files[0].bytes],{type:"image/png"}),files[0].name);
-  else download(buildZip(files),baseName()+" 이미지.zip");
-  setMsg(files.length===1?"이미지 저장 완료":`이미지 ${files.length}장을 zip으로 저장했어요`,"ok");
+  const files=await (IMGS||(prepImages(),IMGS));
+  if(navigator.canShare&&navigator.canShare({files})){
+    try{
+      await navigator.share({files});
+      setMsg(`이미지 ${files.length}장 공유창을 열었어요. [이미지 저장]을 누르면 갤러리에 한 번에 저장돼요`,"ok"); return;
+    }catch(e){
+      if(e&&e.name==="AbortError"){setMsg("공유를 취소했어요","ok");return;}
+    }
+  }
+  // 공유창을 못 쓰는 환경: 한 장씩 바로 다운로드
+  for(let i=0;i<files.length;i++){download(files[i],files[i].name); await new Promise(r=>setTimeout(r,700));}
+  setMsg(`이미지 ${files.length}장을 내려받았어요`,"ok");
 }
 function showPages(){ $("pages").innerHTML=MODEL.map(svgOf).join(""); }
 
@@ -287,8 +304,8 @@ async function build(){
     await Promise.all([document.fonts.load('400 10px NSKR',"가"),document.fonts.load('700 10px NSKR',"가")]);
     await document.fonts.ready;
     const rs=parseFloat($("rsize").value)||romanSize(roman);
-    MODEL=layout(items,roman,title,rs); META={roman,title};
-    showPages();
+    MODEL=layout(items,roman,title,rs); META={roman,title}; IMGS=null;
+    showPages(); prepImages();
     document.title=`${roman} ${title} Ori.`;
     ["pdf","print","img"].forEach(k=>$(k).disabled=false);
     const per=MODEL.map(p=>p.filter(o=>o.k==="t"&&o.t==="O").length);
