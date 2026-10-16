@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#71825a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>OX 문제집 생성기</title>
+<style>
+@font-face{font-family:"NSKR";font-weight:400;src:url("fonts/NotoSerifKR-Regular.woff") format("woff");}
+@font-face{font-family:"NSKR";font-weight:700;src:url("fonts/NotoSerifKR-Bold.woff") format("woff");}
+:root{--bg:#faf7ef;--ink:#4f5a41;--sub:#7d8670;--line:#d3dcc2;--accent:#71825a;--card:#fff;}
+@media (prefers-color-scheme:dark){:root{--bg:#1f231b;--ink:#e6ead9;--sub:#a3ab94;--line:#3a4132;--accent:#9db17f;--card:#272c22;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"NSKR","Apple SD Gothic Neo",serif;-webkit-text-size-adjust:100%}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:20px;margin:6px 0 4px;color:var(--accent)}
+p.hint{margin:0 0 16px;color:var(--sub);font-size:13px;line-height:1.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:12px;color:var(--sub);margin:0 0 4px}
+textarea,input[type=text],input[type=number]{width:100%;font:inherit;font-size:16px;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px}
+textarea{height:170px;resize:vertical;line-height:1.45}
+.row{display:grid;grid-template-columns:90px 1fr 90px;gap:10px;margin-top:12px}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+button,.filebtn{font:inherit;font-size:15px;border-radius:10px;border:1px solid var(--accent);background:transparent;color:var(--accent);padding:10px 14px;cursor:pointer}
+button.primary{background:var(--accent);color:#fff}
+.filebtn input{display:none}
+#msg{font-size:13px;line-height:1.5;margin-top:10px;white-space:pre-wrap}
+#msg.err{color:#b4452f}#msg.ok{color:var(--accent)}
+#pages{display:flex;flex-direction:column;align-items:center;gap:14px}
+#pages svg{width:100%;max-width:595px;height:auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+@media print{
+ @page{size:595.27pt 841.89pt;margin:0}
+ html,body{background:#fff}
+ .wrap{padding:0;max-width:none}
+ .ui{display:none!important}
+ #pages{display:block}
+ #pages svg{display:block;width:595.27pt;height:841.89pt;max-width:none;box-shadow:none;break-after:page;page-break-after:always}
+ #pages svg:last-child{break-after:auto;page-break-after:auto}
+ *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="ui">
+  <h1>OX 문제집 생성기</h1>
+  <p class="hint">문항 글을 붙여넣거나 txt 파일을 첨부하면 고정 템플릿(봄 들판 배경) 그대로 페이지를 만들어 줘요. 첫 줄이 “V. 근대 서양 사상”이면 제목은 자동으로 채워져요.</p>
+  <div class="card">
+   <label for="src">문항 (한 줄에 하나: N. 문장 [연도. 시험명] p.쪽수)</label>
+   <textarea id="src" placeholder="V. 근대 서양 사상&#10;1. 베이컨은 … [2025. 수능]"></textarea>
+   <div class="row">
+    <div><label for="roman">로마숫자</label><input id="roman" type="text" value="I."></div>
+    <div><label for="title">한글 제목</label><input id="title" type="text" value=""></div>
+    <div><label for="rsize">숫자 크기</label><input id="rsize" type="number" step="0.5" placeholder="자동"></div>
+   </div>
+   <div class="btns">
+    <label class="filebtn">txt 첨부<input id="file" type="file" accept=".txt,text/plain"></label>
+    <button class="primary" id="go">페이지 만들기</button>
+    <button id="pdf" disabled>PDF로 저장</button>
+    <button id="print" disabled>인쇄</button>
+    <button id="img" disabled>이미지로 저장</button>
+   </div>
+   <div id="msg"></div>
+  </div>
+ </div>
+ <div id="pages"></div>
+</div>
+<script>
+"use strict";
+// ---------- 고정 템플릿 수치 (바꾸지 말 것) ----------
+const PAGE_W=595.27, PAGE_H=841.89;
+const NUM_X=36.3, BODY_X=63.1;
+const BODY_SIZE=10.0, SOURCE_SIZE=8.3, OX_SIZE=10.5;
+const LINE_HEIGHT=18.0, PARA_GAP=14.5;
+const FIRST_BASELINE=675.0, BOTTOM_LIMIT=92.0;
+const BETWEEN=LINE_HEIGHT+PARA_GAP, WITHIN=LINE_HEIGHT*1.5;
+const COL_BODY="rgb(117,110,100)", COL_SOURCE="rgb(154,160,137)", COL_TITLE="rgb(113,130,90)", COL_DOT="rgb(185,195,165)";
+const DIVIDER_X=75.35, BOX_LEFT_X=30.5;
+const KR_TITLE_X=86.5, KR_TITLE_SIZE=16.5;
+const ROMAN_BASELINE=760.05, KR_TITLE_BASELINE=760.6;
+const PAGE_NUM_X=31.0, PAGE_NUM_BASELINE=39.5, PAGE_NUM_SIZE=13.5;
+const O_CENTER=525.0, X_CENTER=555.0;
+const AVAIL=(O_CENTER-10.0)-BODY_X;
+const FAM='NSKR, "Noto Serif CJK KR", "Apple SD Gothic Neo", serif';
+
+const $=id=>document.getElementById(id);
+const ctx=document.createElement("canvas").getContext("2d");
+function setFont(w,s){ctx.font=`${w} ${s}px ${FAM}`; if("fontKerning" in ctx) ctx.fontKerning="none";}
+function width(t,w,s){setFont(w,s);return ctx.measureText(t).width;}
+
+function romanSize(r){
+  if(r==="I."||r==="II.") return 26;
+  for(const s of [22,19,16,14,12,10]){ if(inkWidth(r,700,s)<=36.6) return s; }
+  return 10;
+}
+function inkWidth(t,w,s){setFont(w,s);const m=ctx.measureText(t);return m.actualBoundingBoxLeft+m.actualBoundingBoxRight;}
+
+function parse(text){
+  const lines=text.replace(/\r/g,"").split("\n").map(l=>l.trim()).filter(l=>l);
+  const pat=/^(\d+)\.\s+(.*)(\[[^\]]+\].*)$/;
+  const items=[]; let head=null;
+  for(const line of lines){
+    const m=line.match(pat);
+    if(!m){
+      if(!items.length){head=line;continue;}
+      throw new Error("형식 오류(출처 [..] 없음): "+line.slice(0,60));
+    }
+    items.push({num:+m[1],body:m[2].replace(/\s+$/,""),source:m[3].trim()});
+  }
+  items.forEach((it,i)=>{ if(it.num!==i+1) throw new Error(`번호가 이어지지 않아요: ${i+1}번 자리에 ${it.num}번이 있어요`); });
+  if(!items.length) throw new Error("문항을 찾지 못했어요.");
+  return {items,head};
+}
+
+function wrapItem(it){
+  const words=[];
+  for(const w of it.body.split(" ")) if(w) words.push({t:w,w:400,s:BODY_SIZE,c:COL_BODY});
+  for(const w of it.source.split(" ")) if(w) words.push({t:w,w:400,s:SOURCE_SIZE,c:COL_SOURCE});
+  const lines=[]; let cur=[], cw=0;
+  for(const wd of words){
+    const ww=width(wd.t,wd.w,wd.s);
+    const ex=cur.length?width(" ",wd.w,wd.s):0;
+    if(cur.length && cw+ex+ww>AVAIL){lines.push(cur);cur=[{...wd,x:0,ww}];cw=ww;}
+    else{ if(cur.length) cw+=ex; cur.push({...wd,x:cw,ww}); cw+=ww; }
+  }
+  if(cur.length) lines.push(cur);
+  return lines;
+}
+
+function paginate(items,lines){
+  const span=n=>(lines[n].length-1)*WITHIN;
+  const fits=idx=>{let y=null;for(let i=0;i<idx.length;i++){const fy=i===0?FIRST_BASELINE:y-BETWEEN;y=fy-span(idx[i]);if(y<BOTTOM_LIMIT)return false;}return true;};
+  const all=items.map(i=>i.num);
+  // greedy
+  let pages=[],cur=[],y=null;
+  for(const n of all){
+    const fy=!cur.length?FIRST_BASELINE:y-BETWEEN; let ly=fy-span(n);
+    if(ly<BOTTOM_LIMIT&&cur.length){pages.push(cur);cur=[n];ly=FIRST_BASELINE-span(n);} else cur.push(n);
+    y=ly;
+  }
+  if(cur.length)pages.push(cur);
+  let np=pages.length;
+  for(;;np++){
+    const b=Math.floor(all.length/np), r=all.length%np; const chunks=[]; let p=0;
+    for(let i=0;i<np;i++){const s=i<r?b+1:b;chunks.push(all.slice(p,p+s));p+=s;}
+    if(chunks.every(fits)) return chunks;
+  }
+}
+
+let LAST=null;
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const f2=x=>x.toFixed(2);
+
+function layout(items,roman,title,rsize){
+  const lines={}; items.forEach(it=>lines[it.num]=wrapItem(it));
+  const pages=paginate(items,lines);
+  setFont(700,rsize); const m=ctx.measureText(roman);
+  const inkL=-m.actualBoundingBoxLeft, inkW=m.actualBoundingBoxLeft+m.actualBoundingBoxRight;
+  const romanX=(BOX_LEFT_X+DIVIDER_X)/2 - inkW/2 - inkL + 3.0;
+  const Ow=width("O",700,OX_SIZE), Xw=width("X",700,OX_SIZE);
+  const model=[];
+  pages.forEach((pg,pi)=>{
+    const ops=[]; const T=(x,base,t,w,sz,c)=>ops.push({k:"t",x,y:base,t,w,s:sz,c});
+    T(romanX,ROMAN_BASELINE,roman,700,rsize,COL_TITLE);
+    T(KR_TITLE_X,KR_TITLE_BASELINE,title,700,KR_TITLE_SIZE,COL_TITLE);
+    T(PAGE_NUM_X,PAGE_NUM_BASELINE,String(pi+1).padStart(2,"0"),400,PAGE_NUM_SIZE,COL_TITLE);
+    let prev=null;
+    pg.forEach((n,i)=>{
+      let y=i===0?FIRST_BASELINE:prev-BETWEEN;
+      T(NUM_X,y,n+".",400,BODY_SIZE,COL_BODY);
+      const L=lines[n]; let endX=BODY_X, ly=y;
+      L.forEach((line,li)=>{
+        line.forEach(w=>T(BODY_X+w.x,y,w.t,w.w,w.s,w.c));
+        const last=line[line.length-1]; endX=BODY_X+last.x+last.ww; ly=y;
+        if(li<L.length-1) y-=WITHIN;
+      });
+      const ds=endX+4.0, de=O_CENTER-8.0;
+      if(de>ds) ops.push({k:"l",x1:ds,x2:de,y:ly+3.0,c:COL_DOT});
+      T(O_CENTER-Ow/2,ly,"O",700,OX_SIZE,COL_BODY);
+      T(X_CENTER-Xw/2,ly,"X",700,OX_SIZE,COL_BODY);
+      prev=ly;
+    });
+    model.push(ops);
+  });
+  return model;
+}
+
+function svgOf(ops){
+  const g=ops.map(o=>o.k==="t"
+    ? `<text x="${f2(o.x)}" y="${f2(PAGE_H-o.y)}" font-weight="${o.w}" font-size="${o.s}" fill="${o.c}">${esc(o.t)}</text>`
+    : `<line x1="${f2(o.x1)}" x2="${f2(o.x2)}" y1="${f2(PAGE_H-o.y)}" y2="${f2(PAGE_H-o.y)}" stroke="${o.c}" stroke-width="0.6" stroke-dasharray="1.4 1.6"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_W} ${PAGE_H}" width="${PAGE_W}pt" height="${PAGE_H}pt" font-family='${FAM}' style="font-kerning:none">`+
+    `<image href="bg.png" x="0" y="0" width="${PAGE_W}" height="${PAGE_H}" preserveAspectRatio="none"/>`+g+`</svg>`;
+}
+
+let BG=null;
+function loadBG(){return BG||(BG=new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src="bg.png";}));}
+async function canvasOf(ops,scale){
+  const bg=await loadBG();
+  const cv=document.createElement("canvas"); cv.width=Math.round(PAGE_W*scale); cv.height=Math.round(PAGE_H*scale);
+  const c=cv.getContext("2d"); c.scale(cv.width/PAGE_W,cv.height/PAGE_H);
+  if("fontKerning" in c) c.fontKerning="none";
+  c.drawImage(bg,0,0,PAGE_W,PAGE_H); c.textBaseline="alphabetic";
+  for(const o of ops){
+    if(o.k==="t"){c.font=`${o.w} ${o.s}px ${FAM}`;c.fillStyle=o.c;c.fillText(o.t,o.x,PAGE_H-o.y);}
+    else{c.save();c.strokeStyle=o.c;c.lineWidth=0.6;c.setLineDash([1.4,1.6]);c.beginPath();c.moveTo(o.x1,PAGE_H-o.y);c.lineTo(o.x2,PAGE_H-o.y);c.stroke();c.restore();}
+  }
+  return cv;
+}
+const toBlob=(cv,type,q)=>new Promise(r=>cv.toBlob(r,type,q));
+
+// ---------- 파일 만들기: PDF(이미지 기반) / ZIP ----------
+const enc=new TextEncoder();
+function concat(parts){let n=0;parts.forEach(p=>n+=p.length);const o=new Uint8Array(n);let k=0;parts.forEach(p=>{o.set(p,k);k+=p.length;});return o;}
+function buildPDF(jpegs){ // jpegs: [{bytes,w,h}]
+  const objs=[]; const add=b=>{objs.push(b);return objs.length;};
+  const n=jpegs.length;
+  // 1=catalog 2=pages, then per page: image, content, page
+  objs.push(null,null);
+  const pageIds=[];
+  jpegs.forEach((j,i)=>{
+    const img=objs.length+1, cont=img+1, page=img+2;
+    add(concat([enc.encode(`<< /Type /XObject /Subtype /Image /Width ${j.w} /Height ${j.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${j.bytes.length} >>\nstream\n`),j.bytes,enc.encode("\nendstream")]));
+    const cs=`q ${PAGE_W} 0 0 ${PAGE_H} 0 0 cm /Im0 Do Q`;
+    add(enc.encode(`<< /Length ${cs.length} >>\nstream\n${cs}\nendstream`));
+    add(enc.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /XObject << /Im0 ${img} 0 R >> >> /Contents ${cont} 0 R >>`));
+    pageIds.push(page);
+  });
+  objs[0]=enc.encode("<< /Type /Catalog /Pages 2 0 R >>");
+  objs[1]=enc.encode(`<< /Type /Pages /Kids [${pageIds.map(i=>i+" 0 R").join(" ")}] /Count ${n} >>`);
+  const out=[enc.encode("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")]; let off=out[0].length; const xref=[];
+  objs.forEach((b,i)=>{xref.push(off);const h=enc.encode(`${i+1} 0 obj\n`),t=enc.encode("\nendobj\n");out.push(h,b,t);off+=h.length+b.length+t.length;});
+  let x=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+xref.map(o=>String(o).padStart(10,"0")+" 00000 n \n").join("");
+  x+=`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${off}\n%%EOF`;
+  out.push(enc.encode(x)); return new Blob([concat(out)],{type:"application/pdf"});
+}
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+const crc32=b=>{let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC[(c^b[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0;};
+function buildZip(files){ // [{name,bytes}] store-only
+  const out=[],cen=[]; let off=0;
+  for(const f of files){
+    const nm=enc.encode(f.name), crc=crc32(f.bytes), sz=f.bytes.length;
+    const lh=new DataView(new ArrayBuffer(30)); lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+    lh.setUint32(14,crc,true);lh.setUint32(18,sz,true);lh.setUint32(22,sz,true);lh.setUint16(26,nm.length,true);
+    out.push(new Uint8Array(lh.buffer),nm,f.bytes);
+    const ch=new DataView(new ArrayBuffer(46)); ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);
+    ch.setUint32(16,crc,true);ch.setUint32(20,sz,true);ch.setUint32(24,sz,true);ch.setUint16(28,nm.length,true);ch.setUint32(42,off,true);
+    cen.push(new Uint8Array(ch.buffer),nm); off+=30+nm.length+sz;
+  }
+  const cd=concat(cen); const e=new DataView(new ArrayBuffer(22)); e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cd.length,true);e.setUint32(16,off,true);
+  return new Blob([...out,cd,new Uint8Array(e.buffer)],{type:"application/zip"});
+}
+function download(blob,name){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+}
+let MODEL=null, META=null;
+const baseName=()=>`${META.roman} ${META.title} Ori.`;
+async function savePDF(){
+  setMsg("PDF 만드는 중…");
+  const jp=[]; for(const ops of MODEL){const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/jpeg",0.95);jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:cv.width,h:cv.height});}
+  download(buildPDF(jp),baseName()+".pdf"); setMsg(`PDF 저장 완료 (${MODEL.length}페이지, 이미지 기반)`,"ok");
+}
+async function saveImages(){
+  setMsg("이미지 만드는 중…");
+  const files=[]; let i=0;
+  for(const ops of MODEL){i++;const cv=await canvasOf(ops,3);const b=await toBlob(cv,"image/png");files.push({name:`${baseName()} ${String(i).padStart(2,"0")}.png`,bytes:new Uint8Array(await b.arrayBuffer())});}
+  if(files.length===1) download(new Blob([files[0].bytes],{type:"image/png"}),files[0].name);
+  else download(buildZip(files),baseName()+" 이미지.zip");
+  setMsg(files.length===1?"이미지 저장 완료":`이미지 ${files.length}장을 zip으로 저장했어요`,"ok");
+}
+function showPages(){ $("pages").innerHTML=MODEL.map(svgOf).join(""); }
+
+function setMsg(t,cls){const m=$("msg");m.textContent=t;m.className=cls||"";}
+function fillHead(head){
+  if(!head) return;
+  const m=head.match(/^([IVXLC]+\.)\s*(.+)$/);
+  if(m){$("roman").value=m[1];$("title").value=m[2].trim();}
+}
+
+async function build(){
+  try{
+    setMsg("만드는 중…");
+    const {items,head}=parse($("src").value);
+    fillHead(head);
+    const roman=$("roman").value.trim(), title=$("title").value.trim();
+    if(!roman||!title) throw new Error("로마숫자와 한글 제목을 입력해 주세요.");
+    await Promise.all([document.fonts.load('400 10px NSKR',"가"),document.fonts.load('700 10px NSKR',"가")]);
+    await document.fonts.ready;
+    const rs=parseFloat($("rsize").value)||romanSize(roman);
+    MODEL=layout(items,roman,title,rs); META={roman,title};
+    showPages();
+    document.title=`${roman} ${title} Ori.`;
+    ["pdf","print","img"].forEach(k=>$(k).disabled=false);
+    const per=MODEL.map(p=>p.filter(o=>o.k==="t"&&o.t==="O").length);
+    setMsg(`완료: ${items.length}문항, ${MODEL.length}페이지 (페이지당 ${[...new Set(per)].join("/")}문항), 로마숫자 ${rs}pt\n[PDF로 저장]·[이미지로 저장]은 바로 파일로 내려받고, [인쇄]는 인쇄 창을 열어요(여백 없음, 배경 그래픽 켜기)`,"ok");
+    try{localStorage.setItem("ox-draft",$("src").value);}catch(e){}
+  }catch(e){setMsg(e.message,"err");}
+}
+
+$("go").onclick=build;
+$("print").onclick=()=>window.print();
+$("pdf").onclick=()=>savePDF().catch(e=>setMsg("PDF 오류: "+e.message,"err"));
+$("img").onclick=()=>saveImages().catch(e=>setMsg("이미지 오류: "+e.message,"err"));
+$("file").onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("src").value=await f.text(); build();
+};
+try{const d=localStorage.getItem("ox-draft"); if(d) $("src").value=d;}catch(e){}
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+window.__build=build;
+</script>
+</body>
+</html>
