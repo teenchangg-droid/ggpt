@@ -70,6 +70,7 @@ button.primary{background:var(--accent);color:#fff}
     <button id="pdf" disabled>PDF로 저장</button>
     <button id="print" disabled>인쇄</button>
     <button id="img" disabled>이미지로 저장</button>
+    <button id="reset">초기화</button>
    </div>
    <div id="msg"></div>
   </div>
@@ -342,6 +343,16 @@ document.querySelectorAll(".themes button").forEach(b=>b.onclick=()=>{
 let _t="green"; try{_t=localStorage.getItem("ox-theme")||"green";}catch(e){}
 applyTheme(_t);
 $("go").onclick=build;
+function resetAll(){
+  if(!confirm("입력한 글과 만든 페이지를 모두 지울까요?")) return;
+  $("src").value=""; $("roman").value="I."; $("title").value=""; $("rsize").value=""; $("file").value="";
+  $("pages").innerHTML=""; MODEL=null; META=null; IMGS=null;
+  ["pdf","print","img"].forEach(k=>$(k).disabled=true);
+  document.title="OX 문제집 생성기"; setMsg("");
+  try{localStorage.removeItem("ox-draft");}catch(e){}
+  window.scrollTo(0,0);
+}
+$("reset").onclick=resetAll;
 $("print").onclick=()=>window.print();
 $("pdf").onclick=()=>savePDF().catch(e=>setMsg("PDF 오류: "+e.message,"err"));
 $("img").onclick=()=>saveImages().catch(e=>setMsg("이미지 오류: "+e.message,"err"));
