@@ -70,6 +70,7 @@ button.primary{background:var(--accent);color:#fff}
     <button id="pdf" disabled>PDF로 저장</button>
     <button id="print" disabled>인쇄</button>
     <button id="img" disabled>이미지로 저장</button>
+    <button id="hide">정답 가리기</button>
     <button id="reset">초기화</button>
    </div>
    <div id="msg"></div>
@@ -116,14 +117,16 @@ function parse(text){
   const lines=text.replace(/\r/g,"").split("\n").map(l=>l.trim()).filter(l=>l);
   const pat=/^(\d+)\.\s+(.*)(\[[^\]]+\].*)$/, pat2=/^(\d+)\.\s+(.+)$/;
   const items=[]; let head=null;
-  for(const line of lines){
+  for(let line of lines){
+    let ans=""; const am=line.match(/\s*([ㅇㄴ])\s*$/);
+    if(am){ans=am[1]; line=line.slice(0,am.index).trimEnd();}
     const m=line.match(pat), m2=m?null:line.match(pat2);
     if(!m&&!m2){
       if(!items.length){head=line;continue;}
       throw new Error("형식 오류(번호로 시작하지 않아요): "+line.slice(0,60));
     }
-    if(m) items.push({num:+m[1],body:m[2].replace(/\s+$/,""),source:m[3].trim()});
-    else items.push({num:+m2[1],body:m2[2].trim(),source:""});
+    if(m) items.push({num:+m[1],body:m[2].replace(/\s+$/,""),source:m[3].trim(),ans});
+    else items.push({num:+m2[1],body:m2[2].trim(),source:"",ans});
   }
   const base=items[0]?items[0].num:1;
   items.forEach((it,i)=>{ if(it.num!==base+i) throw new Error(`번호가 이어지지 않아요: ${base+i}번 자리에 ${it.num}번이 있어요`); });
@@ -135,6 +138,7 @@ function wrapItem(it){
   const words=[];
   for(const w of it.body.split(" ")) if(w) words.push({t:w,w:400,s:BODY_SIZE,c:COL_BODY});
   for(const w of it.source.split(" ")) if(w) words.push({t:w,w:400,s:SOURCE_SIZE,c:COL_SOURCE});
+  if(it.ans&&!HIDE) words.push({t:it.ans,w:400,s:SOURCE_SIZE,c:COL_SOURCE});
   const lines=[]; let cur=[], cw=0;
   for(const wd of words){
     const ww=width(wd.t,wd.w,wd.s);
@@ -160,7 +164,7 @@ function paginate(items,lines){
   return pages;
 }
 
-let LAST=null;
+let LAST=null, HIDE=false;
 const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const f2=x=>x.toFixed(2);
 
@@ -322,8 +326,9 @@ async function build(){
     showPages(); prepImages();
     document.title=`${roman} ${title} Ori.`;
     ["pdf","print","img"].forEach(k=>$(k).disabled=false);
+    const nAns=items.filter(it=>it.ans).length;
     const per=MODEL.map(p=>p.filter(o=>o.k==="t"&&o.t==="O").length);
-    setMsg(`완료: ${items.length}문항, ${MODEL.length}페이지 (페이지당 ${[...new Set(per)].join("/")}문항), 로마숫자 ${rs}pt\n[PDF로 저장]·[이미지로 저장]은 바로 파일로 내려받고, [인쇄]는 인쇄 창을 열어요(여백 없음, 배경 그래픽 켜기)`,"ok");
+    setMsg(`완료: ${items.length}문항, ${MODEL.length}페이지 (페이지당 ${[...new Set(per)].join("/")}문항), 로마숫자 ${rs}pt${nAns?`, ㅇ/ㄴ ${nAns}개 ${HIDE?"가림":"표시"}`:""}\n[PDF로 저장]·[이미지로 저장]은 바로 파일로 내려받고, [인쇄]는 인쇄 창을 열어요(여백 없음, 배경 그래픽 켜기)`,"ok");
     try{localStorage.setItem("ox-draft",$("src").value);}catch(e){}
   }catch(e){setMsg(e.message,"err");}
 }
@@ -354,6 +359,10 @@ function resetAll(){
   window.scrollTo(0,0);
 }
 $("reset").onclick=resetAll;
+$("hide").onclick=()=>{
+  HIDE=!HIDE; $("hide").textContent=HIDE?"정답 보이기":"정답 가리기";
+  if(MODEL) build();
+};
 $("print").onclick=()=>window.print();
 $("pdf").onclick=()=>savePDF().catch(e=>setMsg("PDF 오류: "+e.message,"err"));
 $("img").onclick=()=>saveImages().catch(e=>setMsg("이미지 오류: "+e.message,"err"));
