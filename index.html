@@ -70,6 +70,7 @@ button.primary{background:var(--accent);color:#fff}
     <button id="pdf" disabled>PDF로 저장</button>
     <button id="print" disabled>인쇄</button>
     <button id="img" disabled>이미지로 저장</button>
+    <button id="shuf">문항 섞기</button>
     <button id="hide">정답 가리기</button>
     <button id="reset">초기화</button>
    </div>
@@ -359,6 +360,17 @@ function resetAll(){
   window.scrollTo(0,0);
 }
 $("reset").onclick=resetAll;
+function shuffleItems(){
+  try{
+    const {items,head}=parse($("src").value);
+    const base=items[0].num;
+    for(let i=items.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[items[i],items[j]]=[items[j],items[i]];}
+    const lines=items.map((it,i)=>[`${base+i}.`,it.body,it.source,it.ans].filter(Boolean).join(" "));
+    $("src").value=(head?head+"\n":"")+lines.join("\n");
+    build();
+  }catch(e){setMsg(e.message,"err");}
+}
+$("shuf").onclick=shuffleItems;
 $("hide").onclick=()=>{
   HIDE=!HIDE; $("hide").textContent=HIDE?"정답 보이기":"정답 가리기";
   if(MODEL) build();
