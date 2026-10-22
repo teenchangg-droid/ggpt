@@ -57,7 +57,7 @@ button.primary{background:var(--accent);color:#fff}
   <p class="hint">문항 글을 붙여넣거나 txt 파일을 첨부하면 고정 템플릿 그대로 페이지를 만들어 줘요. 첫 줄이 “V. 근대 서양 사상”이면 제목은 자동으로 채워져요.</p>
   <div class="themes"><button type="button" data-t="green">🌿 초록</button><button type="button" data-t="sakura">🌸 벚꽃</button></div>
   <div class="card">
-   <label for="src">문항 (한 줄에 하나: N. 문장 [연도. 시험명] p.쪽수)</label>
+   <label for="src">문항 (한 줄에 하나: N. 문장 — 뒤에 [출처]는 있어도, 없어도 돼요)</label>
    <textarea id="src" placeholder="V. 근대 서양 사상&#10;1. 베이컨은 … [2025. 수능]"></textarea>
    <div class="row">
     <div><label for="roman">로마숫자</label><input id="roman" type="text" value="I."></div>
@@ -114,15 +114,16 @@ function inkWidth(t,w,s){setFont(w,s);const m=ctx.measureText(t);return m.actual
 
 function parse(text){
   const lines=text.replace(/\r/g,"").split("\n").map(l=>l.trim()).filter(l=>l);
-  const pat=/^(\d+)\.\s+(.*)(\[[^\]]+\].*)$/;
+  const pat=/^(\d+)\.\s+(.*)(\[[^\]]+\].*)$/, pat2=/^(\d+)\.\s+(.+)$/;
   const items=[]; let head=null;
   for(const line of lines){
-    const m=line.match(pat);
-    if(!m){
+    const m=line.match(pat), m2=m?null:line.match(pat2);
+    if(!m&&!m2){
       if(!items.length){head=line;continue;}
-      throw new Error("형식 오류(출처 [..] 없음): "+line.slice(0,60));
+      throw new Error("형식 오류(번호로 시작하지 않아요): "+line.slice(0,60));
     }
-    items.push({num:+m[1],body:m[2].replace(/\s+$/,""),source:m[3].trim()});
+    if(m) items.push({num:+m[1],body:m[2].replace(/\s+$/,""),source:m[3].trim()});
+    else items.push({num:+m2[1],body:m2[2].trim(),source:""});
   }
   const base=items[0]?items[0].num:1;
   items.forEach((it,i)=>{ if(it.num!==base+i) throw new Error(`번호가 이어지지 않아요: ${base+i}번 자리에 ${it.num}번이 있어요`); });
